@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Minecraft with Leaderboard</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #87CEEB; font-family: 'Arial', sans-serif; }
+        
+        /* ТАБЛИЦА ЛИДЕРОВ */
+        #leaderboard {
+            position: fixed; top: 100px; left: 20px;
+            background: rgba(0,0,0,0.8); color: white;
+            padding: 15px; border-radius: 10px; border: 2px solid #555;
+            width: 180px; z-index: 100;
+        }
+        #leaderboard h3 { margin: 0 0 10px 0; color: #ffd700; font-size: 16px; text-align: center; }
+        .leader-item { font-size: 14px; margin-bottom: 5px; display: flex; justify-content: space-between; }
+
+        #balance-board {
+            position: fixed; top: 20px; left: 20px;
+            background: rgba(0,0,0,0.8); color: #00ff00;
+            padding: 15px; border-radius: 10px; border: 2px solid #555;
+            font-size: 20px; z-index: 100;
+        }
+
+        #shop-panel {
+            position: fixed; top: 20px; right: 20px;
+            width: 200px; background: rgba(40, 40, 40, 0.9);
+            border: 3px solid #ffd700; border-radius: 15px; padding: 15px; color: white; z-index: 100;
+        }
+        .buy-btn { background: #555; border: 1px solid #777; color: white; padding: 8px; margin-top: 10px; border-radius: 5px; cursor: pointer; width: 100%; }
+
+        #hotbar {
+            position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px; background: rgba(0,0,0,0.8); padding: 12px; border-radius: 15px; z-index: 100;
+        }
+        .slot { width: 50px; height: 50px; background: #333; border: 2px solid #555; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 25px; }
+        .slot.selected { border-color: #00ff00; }
+        #sell-btn { background: #27ae60; border: none; color: white; padding: 0 15px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+
+        canvas { display: block; }
+    </style>
+</head>
+<body>
+
+<div id="balance-board">💰 <span id="money">0</span>$</div>
+
+<div id="leaderboard">
+    <h3>🏆 ТОП ДОБЫТЧИКОВ</h3>
+    <div id="leader-list"></div>
+    <button onclick="changeName()" style="width:100%; margin-top:10px; font-size:10px;">Сменить имя</button>
+</div>
+
+<div id="shop-panel">
+    <div style="text-align:center; color:#ffd700">🛒 МАГАЗИН</div>
+    <button class="buy-btn" onclick="buy('pick')">🪓 Кирка x2 (100$)</button>
+    <button class="buy-btn" onclick="buy('boots')">👟 Прыжок (150$)</button>
+</div>
+
+<div id="hotbar">
+    <div class="slot selected" onclick="sel(0, '🟫')" id="s0">🟫</div>
+    <div class="slot" onclick="sel(1, '⬛')" id="s1">⬛</div>
+    <button id="sell-btn" onclick="sellAll()">ПРОДАТЬ ВСЁ</button>
+</div>
+
+<canvas id="game"></canvas>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+
+let money = 0;
+let multiplier = 1;
+let totalMined = 0;
+let playerName = localStorage.getItem('mineName') || "Игрок";
+let inv = { "🟫": 0, "⬛": 0, "🟡": 0 };
+let currentBrush = "🟫";
+let world = {};
+const size = 40;
+
+const player = { x: 400, y: 200, w: 25, h: 35, vx: 0, vy: 0, grounded: false, jump: -11 };
+const keys = {};
+
+function initWorld() {
+    world = {};
+    for (let x = -20; x < 60; x++) {
+        for (let y = 10; y < 40; y++) {
+            let type = "🟫";
+            if (y > 15) type = "⬛";
+            if (y > 20 && Math.random() < 0.1) type = "🟡";
+            world[x + "," + y] = type;
+        }
+        world[x + ",40"] = "⬛"; 
+    }
+}
+
+function solveCol(px, py) {
+    let x1 = Math.floor(px / size), x2 = Math.floor((px + player.w) / size);
+    let y1 = Math.floor(py / size), y2 = Math.floor((py + player.h) / size);
+    return world[x1+","+y1] || world[x2+","+y1] || world[x1+","+y2] || world[x2+","+y2];
+}
+
+function update() {
+    player.vx = (keys['KeyA'] ? -5 : (keys['KeyD'] ? 5 : 0));
+    if ((keys['KeyW'] || keys['Space']) && player.grounded) { player.vy = player.jump; player.grounded = false; }
+    player.vy += 0.5;
+    if (!solveCol(player.x + player.vx, player.y)) player.x += player.vx;
+    if (!solveCol(player.x, player.y + player.vy)) {
+        player.y += player.vy; player.grounded = false;
+    } else {
+        if (player.vy > 0) player.grounded = true;
+        player.vy = 0;
+    }
+    if (player.y > 2000) { player.x = 400; player.y = 200; }
+}
+
+function draw() {
+    canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+    let cx = Math.floor(-player.x + canvas.width/2), cy = Math.floor(-player.y + canvas.height/2);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.save(); ctx.translate(cx, cy);
+    for (let k in world) {
+        let [x, y] = k.split(',').map(Number);
+        if (x*size > player.x - 600 && x*size < player.x + 600) {
+            ctx.fillStyle = world[k] === "🟫" ? "#795548" : (world[k] === "⬛" ? "#555" : "#FFD700");
+            ctx.fillRect(x*size, y*size, size, size);
+            ctx.strokeStyle = "rgba(0,0,0,0.1)"; ctx.strokeRect(x*size, y*size, size, size);
+        }
+    }
+    ctx.fillStyle = "#007bff"; ctx.fillRect(player.x, player.y, player.w, player.h);
+    ctx.restore();
+    requestAnimationFrame(draw);
+}
+
+// ЛОГИКА ТАБЛИЦЫ ЛИДЕРОВ
+function updateLeaderboard() {
+    let scores = JSON.parse(localStorage.getItem('mineLeaderboard')) || [];
+    // Ищем текущего игрока
+    let existing = scores.find(s => s.name === playerName);
+    if (existing) {
+        if (totalMined > existing.score) existing.score = totalMined;
+    } else {
+        scores.push({name: playerName, score: totalMined});
+    }
+    // Сортировка по убыванию
+    scores.sort((a, b) => b.score - a.score);
+    scores = scores.slice(0, 5); // Только топ 5
+    localStorage.setItem('mineLeaderboard', JSON.stringify(scores));
+
+    const list = document.getElementById('leader-list');
+    list.innerHTML = scores.map(s => `<div class="leader-item"><span>${s.name}</span><b>${s.score}</b></div>`).join('');
+}
+
+function changeName() {
+    let n = prompt("Введите ваше имя:");
+    if (n) { playerName = n; localStorage.setItem('mineName', n); updateLeaderboard(); }
+}
+
+function sellAll() {
+    let count = inv["🟫"] + inv["⬛"] + inv["🟡"];
+    totalMined += count; // Добавляем к общему счету для таблицы
+    let profit = (inv["🟫"]*1 + inv["⬛"]*5 + inv["🟡"]*50) * multiplier;
+    money += profit;
+    inv = { "🟫": 0, "⬛": 0, "🟡": 0 };
+    document.getElementById('money').innerText = money;
+    updateLeaderboard();
+}
+
+function buy(type) {
+    if (type === 'pick' && money >= 100) { money -= 100; multiplier++; }
+    else if (type === 'boots' && money >= 150) { money -= 150; player.jump = -14; }
+    document.getElementById('money').innerText = money;
+}
+
+canvas.onmousedown = (e) => {
+    let cx = -player.x + canvas.width/2, cy = -player.y + canvas.height/2;
+    let gx = Math.floor((e.clientX - cx) / size), gy = Math.floor((e.clientY - cy) / size);
+    if (e.button === 0 && world[gx+","+gy]) {
+        inv[world[gx+","+gy]]++; delete world[gx+","+gy];
+    } else if (e.button === 2 && !world[gx+","+gy] && inv[currentBrush] > 0) {
+        world[gx+","+gy] = currentBrush; inv[currentBrush]--;
+    }
+};
+
+function sel(i, type) {
+    document.querySelectorAll('.slot').forEach(s => s.classList.remove('selected'));
+    document.getElementById('s'+i).classList.add('selected');
+    currentBrush = type;
+}
+
+window.onkeydown = (e) => keys[e.code] = true;
+window.onkeyup = (e) => keys[e.code] = false;
+window.oncontextmenu = () => false;
+
+initWorld();
+updateLeaderboard();
+setInterval(update, 20);
+draw();
+</script>
+</body>
+</html>
